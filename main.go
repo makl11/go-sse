@@ -51,7 +51,12 @@ func createProducer() chan Event {
 func main() {
 	host := flag.String("host", "localhost", "Host the server listens on")
 	port := flag.Int("port", 6969, "Port the server listens on")
+	debug := flag.Bool("debug", false, "enable debug output")
 	flag.Parse()
+
+	if *debug {
+		slog.SetLogLoggerLevel(slog.LevelDebug)
+	}
 
 	producer := channel_mux.NewChannelMux(createProducer())
 	http.HandleFunc("/sse", makeHandleSse(producer))
@@ -68,25 +73,31 @@ func makeHandleSse(channelMux channel_mux.ChannelMux[Event]) func(w http.Respons
 	return func(w http.ResponseWriter, r *http.Request) {
 		eventChannel := channelMux.NewOut()
 		defer close(eventChannel)
+		defer channelMux.RemoveOut(eventChannel)
 		rc := http.NewResponseController(w)
 		w.Header().Add("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 
 		for event := range eventChannel {
-			data, err := event.Marshall()
-			if err != nil {
-				slog.Error("Failed to marshall event", "event", event, "err", err)
+			select {
+			case <-r.Context().Done():
 				return
-			}
-			_, err = w.Write(data)
-			if err != nil {
-				slog.Error("Failed to write event", "event", event, "err", err)
-				return
-			}
-			err = rc.Flush()
-			if err != nil {
-				slog.Error("Failed to flush event", "event", event, "err", err)
-				return
+			default:
+				data, err := event.Marshall()
+				if err != nil {
+					slog.Error("Failed to marshall event", "event", event, "err", err)
+					return
+				}
+				_, err = w.Write(data)
+				if err != nil {
+					slog.Error("Failed to write event", "event", event, "err", err)
+					return
+				}
+				err = rc.Flush()
+				if err != nil {
+					slog.Error("Failed to flush event", "event", event, "err", err)
+					return
+				}
 			}
 		}
 	}

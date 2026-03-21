@@ -8,6 +8,7 @@ import (
 type ChannelMux[T any] interface {
 	NewOut() chan T
 	AppendOut(out chan T)
+	RemoveOut(out chan T)
 }
 
 type channelMux[T any] struct {
@@ -20,15 +21,10 @@ func NewChannelMux[T any](in chan T) ChannelMux[T] {
 	mux := channelMux[T]{rwm: &sync.RWMutex{}, in: in, outs: make(map[chan T]struct{})}
 	go func() {
 		for x := range in {
+			slog.Debug("Send message to clients", "clientCount", len(mux.outs))
 			mux.rwm.Lock()
 			for out := range mux.outs {
-				select {
-				case <-out:
-					delete(mux.outs, out)
-					slog.Debug("Removed closed channel", "channel", out)
-				default:
-					out <- x
-				}
+				out <- x
 			}
 			mux.rwm.Unlock()
 		}
@@ -45,5 +41,11 @@ func (cm channelMux[T]) NewOut() chan T {
 func (cm channelMux[T]) AppendOut(out chan T) {
 	cm.rwm.Lock()
 	cm.outs[out] = struct{}{}
+	cm.rwm.Unlock()
+}
+
+func (cm channelMux[T]) RemoveOut(out chan T) {
+	cm.rwm.Lock()
+	delete(cm.outs, out)
 	cm.rwm.Unlock()
 }
