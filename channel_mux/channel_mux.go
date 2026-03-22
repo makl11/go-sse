@@ -22,11 +22,11 @@ func NewChannelMux[T any](in chan T) ChannelMux[T] {
 	go func() {
 		for x := range in {
 			slog.Debug("Send message to clients", "clientCount", len(mux.outs))
-			mux.rwm.Lock()
+			mux.rwm.RLock()
 			for out := range mux.outs {
 				out <- x
 			}
-			mux.rwm.Unlock()
+			mux.rwm.RUnlock()
 		}
 	}()
 	return &mux
